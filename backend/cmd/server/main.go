@@ -64,10 +64,10 @@ func main() {
 	// 服务
 	authService := service.NewAuthService(userRepo, logger, cfg.JWTSecret, cfg.JWTExpireHours)
 	userService := service.NewUserService(userRepo, logger)
-	plotService := service.NewPlotService(plotRepo, db, logger)
+	plotService := service.NewPlotService(plotRepo, planRepo, harvestRepo, db, logger)
 	auditService := service.NewAuditService(auditRepo, logger)
 	planService := service.NewPlantingPlanService(planRepo, plotRepo, plotService, db, logger)
-	harvestService := service.NewHarvestRecordService(harvestRepo, planRepo, db, logger)
+	harvestService := service.NewHarvestRecordService(harvestRepo, planRepo, plotService, db, logger)
 	diaryService := service.NewDiaryService(diaryRepo, planRepo, logger)
 	communityService := service.NewCommunityService(postRepo, logger)
 	statsService := service.NewStatsService(userRepo, plotRepo, planRepo, harvestRepo, diaryRepo, postRepo, logger)

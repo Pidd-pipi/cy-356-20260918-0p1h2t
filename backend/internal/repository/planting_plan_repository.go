@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/communitygarden/server/internal/model"
 	"github.com/communitygarden/server/internal/util"
@@ -16,11 +17,16 @@ type PlantingPlanRepository interface {
 	Update(p *model.PlantingPlan) error
 	UpdateWithTx(tx *gorm.DB, p *model.PlantingPlan) error
 	FindByID(id uint) (*model.PlantingPlan, error)
+	FindByIDForUpdate(tx *gorm.DB, id uint) (*model.PlantingPlan, error)
 	List(pq util.PageQuery, userID uint, status string) ([]model.PlantingPlan, int64, error)
 	ListByUser(userID uint, pq util.PageQuery) ([]model.PlantingPlan, int64, error)
 	CountByUser(userID uint) (int64, error)
 	CountByStatus() (map[string]int64, error)
 	CountActiveByUser(userID uint) (int64, error)
+	// CountCompletedByPlotTx 在事务内统计某地块已完成（completed）的种植计划数（释放前置条件）。
+	CountCompletedByPlotTx(tx *gorm.DB, plotID uint) (int64, error)
+	// ExistsByPlotTx 在事务内判断某地块是否存在任意种植计划（释放前置条件）。
+	ExistsByPlotTx(tx *gorm.DB, plotID uint) (bool, error)
 }
 
 type plantingPlanRepository struct {
@@ -53,6 +59,18 @@ func (r *plantingPlanRepository) Update(p *model.PlantingPlan) error {
 func (r *plantingPlanRepository) FindByID(id uint) (*model.PlantingPlan, error) {
 	var p model.PlantingPlan
 	if err := r.db.Preload("Plot").Preload("User").First(&p, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &p, nil
+}
+
+// FindByIDForUpdate 事务内行锁查询种植计划（收成记录校验归属时使用）。
+func (r *plantingPlanRepository) FindByIDForUpdate(tx *gorm.DB, id uint) (*model.PlantingPlan, error) {
+	var p model.PlantingPlan
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&p, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}
@@ -115,4 +133,22 @@ func (r *plantingPlanRepository) CountActiveByUser(userID uint) (int64, error) {
 		Where("user_id = ? AND status IN ?", userID, []string{"planned", "planting", "growing", "harvesting"}).
 		Count(&total).Error
 	return total, err
+}
+
+// CountCompletedByPlotTx 事务内统计地块下已完成的种植计划数（释放前置条件之一）。
+func (r *plantingPlanRepository) CountCompletedByPlotTx(tx *gorm.DB, plotID uint) (int64, error) {
+	var total int64
+	err := tx.Model(&model.PlantingPlan{}).
+		Where("plot_id = ? AND status = ?", plotID, "completed").
+		Count(&total).Error
+	return total, err
+}
+
+// ExistsByPlotTx 事务内判断地块是否存在任意种植计划。
+func (r *plantingPlanRepository) ExistsByPlotTx(tx *gorm.DB, plotID uint) (bool, error) {
+	var total int64
+	if err := tx.Model(&model.PlantingPlan{}).Where("plot_id = ?", plotID).Limit(1).Count(&total).Error; err != nil {
+		return false, err
+	}
+	return total > 0, nil
 }

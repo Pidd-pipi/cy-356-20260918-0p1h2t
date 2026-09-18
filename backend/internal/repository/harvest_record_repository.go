@@ -20,6 +20,11 @@ type HarvestRecordRepository interface {
 	List(pq util.PageQuery, userID uint) ([]model.HarvestRecord, int64, error)
 	ListByPlan(planID uint) ([]model.HarvestRecord, error)
 	CountByUser(userID uint) (int64, error)
+	// CountByPlanTx 事务内统计某种植计划下的收成记录数。
+	CountByPlanTx(tx *gorm.DB, planID uint) (int64, error)
+	// CountLinkedToCompletedPlanByPlotTx 事务内统计地块下、且关联种植计划已完成的收成记录数。
+	// 关联计划未完成的收成记录不计入（释放前置条件之一）。
+	CountLinkedToCompletedPlanByPlotTx(tx *gorm.DB, plotID uint) (int64, error)
 	SumWeightByYear(userID uint, year int) (float64, int, error)
 	GroupByCropType(userID uint, year int) (map[string]float64, error)
 	GroupByQuality(userID uint, year int) (map[string]int, error)
@@ -92,6 +97,26 @@ func (r *harvestRecordRepository) CountByUser(userID uint) (int64, error) {
 		return 0, err
 	}
 	return total, nil
+}
+
+// CountByPlanTx 事务内统计某种植计划下的收成记录数。
+func (r *harvestRecordRepository) CountByPlanTx(tx *gorm.DB, planID uint) (int64, error) {
+	var total int64
+	if err := tx.Model(&model.HarvestRecord{}).Where("plan_id = ?", planID).Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+// CountLinkedToCompletedPlanByPlotTx 事务内统计地块下关联计划已完成的收成记录数。
+// 仅统计 planting_plans.status = completed 的收成，关联计划未完成的收成不算数。
+func (r *harvestRecordRepository) CountLinkedToCompletedPlanByPlotTx(tx *gorm.DB, plotID uint) (int64, error) {
+	var total int64
+	err := tx.Model(&model.HarvestRecord{}).
+		Joins("JOIN planting_plans ON planting_plans.id = harvest_records.plan_id").
+		Where("planting_plans.plot_id = ? AND planting_plans.status = ?", plotID, "completed").
+		Count(&total).Error
+	return total, err
 }
 
 func (r *harvestRecordRepository) SumWeightByYear(userID uint, year int) (float64, int, error) {

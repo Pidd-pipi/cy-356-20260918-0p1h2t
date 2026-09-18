@@ -90,7 +90,8 @@ func Seed(db *gorm.DB, logger *slog.Logger) error {
 		{Name: "阳光一区 A01", Code: "P-001", Area: 12.5, SoilType: string(constants.SoilLoam), Sunlight: string(constants.SunlightFull), Latitude: 31.2304, Longitude: 121.4737, Status: string(constants.PlotStatusAvailable), Description: "全日照壤土，适合番茄与辣椒"},
 		{Name: "阳光一区 A02", Code: "P-002", Area: 10.0, SoilType: string(constants.SoilBlack), Sunlight: string(constants.SunlightFull), Latitude: 31.2311, Longitude: 121.4742, Status: string(constants.PlotStatusAdopted), AdopterID: &adopterID, Description: "黑土肥力足，老李认养中"},
 		{Name: "雨水二区 B01", Code: "P-003", Area: 8.8, SoilType: string(constants.SoilClay), Sunlight: string(constants.SunlightPartial), Latitude: 31.2298, Longitude: 121.4751, Status: string(constants.PlotStatusAvailable), Description: "半日照黏土，适合叶菜与根茎"},
-		{Name: "雨水二区 B02", Code: "P-004", Area: 15.2, SoilType: string(constants.SoilSand), Sunlight: string(constants.SunlightFull), Latitude: 31.2289, Longitude: 121.4748, Status: string(constants.PlotStatusHarvested), AdopterID: &adopterID, Description: "沙土排水好，等待释放"},
+		// P-004 已完成一轮种植并录入收成，满足“已完成计划 + 关联收成”，处于可释放状态。
+		{Name: "雨水二区 B02", Code: "P-004", Area: 15.2, SoilType: string(constants.SoilSand), Sunlight: string(constants.SunlightFull), Latitude: 31.2289, Longitude: 121.4748, Status: string(constants.PlotStatusHarvested), AdopterID: &adopterID, Description: "沙土排水好，已收成可释放"},
 		{Name: "阳台三区 C01", Code: "P-005", Area: 6.5, SoilType: string(constants.SoilLoam), Sunlight: string(constants.SunlightShade), Latitude: 31.2309, Longitude: 121.4729, Status: string(constants.PlotStatusAvailable), Description: "遮阴区，推荐薄荷与韭菜"},
 		{Name: "阳台三区 C02", Code: "P-006", Area: 9.0, SoilType: string(constants.SoilBlack), Sunlight: string(constants.SunlightPartial), Latitude: 31.2301, Longitude: 121.4733, Status: string(constants.PlotStatusAvailable), Description: "半日照黑土，香草专区"},
 	}
@@ -114,6 +115,37 @@ func Seed(db *gorm.DB, logger *slog.Logger) error {
 		Notes:               "老李的夏季番茄试验田",
 	}
 	if err := db.Create(&plan).Error; err != nil {
+		return err
+	}
+
+	// P-004 的已完成种植计划 + 一条关联收成记录，用于演示可释放地块。
+	completedPlantDate := now.AddDate(0, 0, -60)
+	completedHarvestDate := util.NextHarvestDate(completedPlantDate, string(constants.CropVegetable))
+	completedPlan := model.PlantingPlan{
+		PlotID:              seedPlots[3].ID,
+		UserID:              farmerID,
+		CropName:            "黄瓜",
+		CropType:            string(constants.CropVegetable),
+		Season:              string(constants.SeasonSummer),
+		Status:              string(constants.PlanStatusCompleted),
+		PlantDate:           &completedPlantDate,
+		ExpectedHarvestDate: &completedHarvestDate,
+		Notes:               "老李的春季黄瓜，已完成并收成",
+	}
+	if err := db.Create(&completedPlan).Error; err != nil {
+		return err
+	}
+	recordDate := now.AddDate(0, 0, -5)
+	harvestRecord := model.HarvestRecord{
+		PlanID:      completedPlan.ID,
+		UserID:      farmerID,
+		CropName:    "黄瓜",
+		HarvestDate: recordDate,
+		WeightKg:    6.8,
+		Quality:     string(constants.QualityGood),
+		Notes:       "首茬黄瓜，口感脆嫩",
+	}
+	if err := db.Create(&harvestRecord).Error; err != nil {
 		return err
 	}
 

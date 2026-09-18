@@ -43,9 +43,15 @@ type PlotOutDTO struct {
 	Adopter     *UserOutDTO `json:"adopter"`
 	Description string      `json:"description"`
 	CreatedAt   string      `json:"created_at"`
+	// 释放入口感知：releasable=false 时 reason/reason_code 说明缺少哪项前置条件。
+	Releasable          bool   `json:"releasable"`
+	ReleaseReasonCode   string `json:"release_reason_code"`
+	ReleaseReason       string `json:"release_reason"`
+	HasCompletedPlan    bool   `json:"has_completed_plan"`
+	HasCompletedHarvest bool   `json:"has_completed_harvest"`
 }
 
-// ToPlotOutDTO 模型转 DTO。
+// ToPlotOutDTO 模型转 DTO（不含释放条件，默认按状态推导；列表/详情接口用 WithReleaseEligibility 覆盖）。
 func ToPlotOutDTO(p *model.Plot) *PlotOutDTO {
 	dto := &PlotOutDTO{
 		ID:          p.ID,
@@ -65,4 +71,27 @@ func ToPlotOutDTO(p *model.Plot) *PlotOutDTO {
 		dto.Adopter = ToUserOutDTO(p.Adopter)
 	}
 	return dto
+}
+
+// ReleaseEligibility 地块释放条件评估结果（service 评估、handler 输出、前端驱动释放入口）。
+type ReleaseEligibility struct {
+	Releasable        bool   `json:"releasable"`
+	ReasonCode        string `json:"reason_code"`
+	Reason            string `json:"reason"`
+	HasPlan           bool   `json:"has_plan"`
+	CompletedPlans    int64  `json:"completed_plans"`
+	CompletedHarvests int64  `json:"completed_plan_harvests"`
+}
+
+// ApplyReleaseEligibility 用服务层评估结果填充释放入口感知字段。
+func (d *PlotOutDTO) ApplyReleaseEligibility(e *ReleaseEligibility) *PlotOutDTO {
+	if e == nil {
+		return d
+	}
+	d.Releasable = e.Releasable
+	d.ReleaseReasonCode = e.ReasonCode
+	d.ReleaseReason = e.Reason
+	d.HasCompletedPlan = e.CompletedPlans > 0
+	d.HasCompletedHarvest = e.CompletedHarvests > 0
+	return d
 }

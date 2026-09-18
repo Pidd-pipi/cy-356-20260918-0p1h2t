@@ -27,5 +27,6 @@ func (r *Router) registerPlots(g *gin.RouterGroup) {
 	{
 		auth.POST("/:id/adopt", r.plotHandler.Adopt)
 		auth.POST("/:id/release", r.plotHandler.Release)
+		auth.GET("/:id/release-eligibility", r.plotHandler.ReleaseEligibility)
 	}
 }

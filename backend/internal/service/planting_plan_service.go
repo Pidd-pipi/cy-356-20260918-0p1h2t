@@ -155,7 +155,9 @@ func (s *PlantingPlanService) ChangeStatus(id, userID uint, role, target string)
 			return util.NewAppError(constants.CodeInternalError, 500, constants.ErrorText[constants.CodeInternalError]).Wrap(err)
 		}
 		if next == constants.PlanStatusCompleted {
-			if err := s.plotSvc.MarkHarvested(tx, plan.PlotID); err != nil {
+			// 完成计划后重新校准地块释放状态：只有“已完成计划 + 关联收成”同时满足才可释放。
+			// 若此时还没有收成记录，地块保持 adopted（已认养），不会提前出现释放入口。
+			if err := s.plotSvc.RefreshHarvestReadyTx(tx, plan.PlotID, "plan_completed"); err != nil {
 				return util.NewAppError(constants.CodeInternalError, 500, constants.ErrorText[constants.CodeInternalError]).Wrap(err)
 			}
 			s.logger.Info(constants.LogPlanCompleted, "plan_id", plan.ID, "user_id", userID, "harvest_count", 0)

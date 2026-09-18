@@ -64,7 +64,7 @@ func TestPlantingPlanService_CreateAndFlow(t *testing.T) {
 		t.Errorf("plan invalid: status=%s", plan.Status)
 	}
 
-	// 状态流转到 completed 后地块应变为 harvested
+	// 状态流转到 completed；此时尚无收成记录，地块必须保持已认养（不可释放）。
 	steps := []string{"planting", "growing", "harvesting", "completed"}
 	for _, s := range steps {
 		if _, err := svc.ChangeStatus(plan.ID, user.ID, "farmer", s); err != nil {
@@ -78,8 +78,23 @@ func TestPlantingPlanService_CreateAndFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
+	if plotAfter.Status != string(constants.PlotStatusAdopted) {
+		t.Errorf("completed plan without harvest: plot status=%s, want adopted", plotAfter.Status)
+	}
+
+	// 录入一条关联到已完成计划的收成后，地块才变为可释放（harvested）。
+	harvestSvc := NewHarvestRecordService(repository.NewHarvestRecordRepository(db), planRepo, plotSvc, db, testLogger())
+	if _, err := harvestSvc.Create(&dto.CreateHarvestRequest{
+		PlanID: plan.ID, CropName: "菠菜", HarvestDate: "2026-05-01", WeightKg: 1.2, Quality: "excellent",
+	}, user.ID); err != nil {
+		t.Fatalf("record harvest: %v", err)
+	}
+	plotAfter, err = plotSvc.GetByID(plot.ID)
+	if err != nil {
+		t.Fatalf("GetByID after harvest: %v", err)
+	}
 	if plotAfter.Status != string(constants.PlotStatusHarvested) {
-		t.Errorf("plot status=%s, want harvested", plotAfter.Status)
+		t.Errorf("completed plan + harvest: plot status=%s, want harvested", plotAfter.Status)
 	}
 }
 

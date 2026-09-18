@@ -11,7 +11,22 @@ export type PlotStatus = 'available' | 'adopted' | 'harvested'
 export const PlotStatusMeta: Record<string, { label: string; type: 'success' | 'warning' | 'info' | 'danger' | 'primary' }> = {
   available: { label: '空闲可认养', type: 'success' },
   adopted: { label: '已认养', type: 'warning' },
-  harvested: { label: '待释放', type: 'info' }
+  harvested: { label: '可释放（已收成）', type: 'info' }
+}
+
+// 地块释放入口不可用原因（与后端 PlotReleaseBlocker 枚举对应，驱动按钮禁用与提示）。
+export type PlotReleaseBlocker =
+  | 'not_adopted'
+  | 'no_plan'
+  | 'plan_ongoing'
+  | 'no_harvest'
+  | 'harvest_unfinished_plan'
+export const PlotReleaseReasonText: Record<string, string> = {
+  not_adopted: '该地块当前未处于认养中，无需释放',
+  no_plan: '还没有种植计划，需完成一次种植并录入收成后方可释放',
+  plan_ongoing: '种植计划尚未完成，完成种植计划后才能释放',
+  no_harvest: '已完成的种植计划还没有收成记录，至少记录一条收成后方可释放',
+  harvest_unfinished_plan: '收成记录对应的种植计划尚未完成，需有收成记录关联到已完成的计划后才能释放'
 }
 
 export type PlanStatus = 'planned' | 'planting' | 'growing' | 'harvesting' | 'completed'

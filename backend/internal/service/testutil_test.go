@@ -72,6 +72,8 @@ func newTestPlot(t *testing.T, db *gorm.DB, code, status string, adopterID *uint
 func newPlotService(t *testing.T, db *gorm.DB) (*PlotService, repository.PlotRepository) {
 	t.Helper()
 	plotRepo := repository.NewPlotRepository(db)
-	svc := NewPlotService(plotRepo, db, testLogger())
+	planRepo := repository.NewPlantingPlanRepository(db)
+	harvestRepo := repository.NewHarvestRecordRepository(db)
+	svc := NewPlotService(plotRepo, planRepo, harvestRepo, db, testLogger())
 	return svc, plotRepo
 }

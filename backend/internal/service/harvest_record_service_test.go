@@ -12,11 +12,11 @@ func TestHarvestRecordService_CreateAndStats(t *testing.T) {
 	db := newTestServiceDB(t)
 	harvestRepo := repository.NewHarvestRecordRepository(db)
 	planRepo := repository.NewPlantingPlanRepository(db)
-	svc := NewHarvestRecordService(harvestRepo, planRepo, db, testLogger())
+	plotSvc, _ := newPlotService(t, db)
+	svc := NewHarvestRecordService(harvestRepo, planRepo, plotSvc, db, testLogger())
 
 	user := newTestUser(t, db, "farmer", "farmer")
 	plot := newTestPlot(t, db, "P-HV", "available", nil)
-	plotSvc, _ := newPlotService(t, db)
 	if _, err := plotSvc.Adopt(plot.ID, user.ID, "farmer", "farmer"); err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
@@ -41,6 +41,14 @@ func TestHarvestRecordService_CreateAndStats(t *testing.T) {
 	}
 	if rec.Quality != string(constants.QualityGood) {
 		t.Errorf("quality=%s", rec.Quality)
+	}
+	// 计划仍在 growing（未完成），即使有收成记录，地块必须保持已认养（不可释放）。
+	afterHarvest, err := plotSvc.GetByID(plot.ID)
+	if err != nil {
+		t.Fatalf("get plot: %v", err)
+	}
+	if afterHarvest.Status != string(constants.PlotStatusAdopted) {
+		t.Errorf("plot with harvest on unfinished plan must stay adopted, got %s", afterHarvest.Status)
 	}
 	stats, err := svc.AnnualStats(user.ID, 2026)
 	if err != nil || stats.TotalWeightKg != 5 || stats.HarvestCount != 1 {

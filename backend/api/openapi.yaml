@@ -52,8 +52,25 @@ paths:
   /plots/{id}/release:
     post:
       tags: [plots]
-      summary: 释放地块
-      responses: { '200': { description: 成功 } }
+      summary: 释放地块（前置条件：存在已完成种植计划且至少一条关联收成记录；事务 + FOR UPDATE，并发仅一人成功）
+      responses:
+        '200': { description: 释放成功，地块回到 available 并清空认养关系 }
+        '409':
+          description: |
+            释放失败，地块保持已认养、认养关系不变。错误码：
+            2010 前置条件不足（message 说明缺少“已完成计划”或“收成记录”）；
+            2011 地块已被并发释放（状态冲突）。
+  /plots/{id}/release-eligibility:
+    get:
+      tags: [plots]
+      summary: 查询地块释放条件（releasable=false 时 reason 说明缺少哪项前置条件）
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        '200':
+          description: |
+            返回 { releasable, reason_code, reason, has_plan, completed_plans,
+            completed_plan_harvests }；reason_code 取值 not_adopted/no_plan/
+            plan_ongoing/no_harvest/harvest_unfinished_plan。
   /planting-plans:
     get:
       tags: [planting-plans]

@@ -39,10 +39,19 @@
       <el-table-column label="认养人" width="120">
         <template #default="{ row }">{{ row.adopter?.nickname || row.adopter?.username || '-' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="220">
+      <el-table-column label="操作" width="260">
         <template #default="{ row }">
           <el-button v-if="row.status === 'available'" type="success" size="small" @click="adopt(row)">认养</el-button>
-          <el-button v-if="canRelease(row)" type="warning" size="small" @click="release(row)">释放</el-button>
+          <template v-if="isAdopter(row)">
+            <el-tooltip
+              v-if="!row.releasable"
+              :content="row.release_reason || '种植计划未完成或缺少收成记录，暂不能释放'"
+              placement="top"
+            >
+              <el-button type="warning" size="small" disabled>释放</el-button>
+            </el-tooltip>
+            <el-button v-else type="warning" size="small" @click="release(row)">释放</el-button>
+          </template>
         </template>
       </el-table-column>
     </DataTable>
@@ -119,8 +128,8 @@ async function fetch() {
   await store.fetchPlots({ page: pagination.page.value, page_size: pagination.size.value })
 }
 
-function canRelease(row: Plot) {
-  return row.status === 'harvested' && (role.value === 'admin' || row.adopter_id === user.value?.id)
+function isAdopter(row: Plot) {
+  return row.status !== 'available' && (role.value === 'admin' || row.adopter_id === user.value?.id)
 }
 
 async function adopt(row: Plot) {
@@ -134,14 +143,28 @@ async function adopt(row: Plot) {
 }
 
 async function release(row: Plot) {
+  // 释放入口只在后端确认 releasable 时可用；点击前再次说明前置条件，避免并发下的误操作。
+  if (!row.releasable) {
+    ElMessage.warning(row.release_reason || '种植计划未完成或缺少收成记录，暂不能释放')
+    return
+  }
   try {
-    await ElMessageBox.confirm(`确认释放地块 ${row.name} 吗？释放后将重新回到共享池。`, '释放确认', { type: 'warning' })
+    await ElMessageBox.confirm(
+      `确认释放地块 ${row.name} 吗？需已完成种植计划并至少记录一条收成，释放后将重新回到共享池。`,
+      '释放确认',
+      { type: 'warning' }
+    )
   } catch {
     return
   }
-  const { releasePlot } = await import('@/api/plot')
-  await releasePlot(row.id)
-  ElMessage.success('地块已释放')
+  try {
+    const { releasePlot } = await import('@/api/plot')
+    await releasePlot(row.id)
+    ElMessage.success('地块已释放')
+  } catch {
+    // 条件不足/并发冲突的具体原因已由 request 拦截器统一提示；
+    // 不更新本地状态，失败后通过重新拉取保持“已认养”展示，避免前端误清认养关系。
+  }
   await fetch()
 }
 

@@ -42,9 +42,27 @@ func PlotStatusText(s string) string {
 	case constants.PlotStatusAdopted:
 		return "已认养"
 	case constants.PlotStatusHarvested:
-		return "待释放"
+		return "可释放（已收成）"
 	default:
 		return "未知状态"
+	}
+}
+
+// PlotReleaseReasonText 地块释放入口不可用原因中文文本（与 service 释放状态机一一对应）。
+func PlotReleaseReasonText(reason string) string {
+	switch constants.PlotReleaseBlocker(reason) {
+	case constants.ReleaseBlockerNotAdopted:
+		return constants.MsgPlotReleaseNotAdopted
+	case constants.ReleaseBlockerNoPlan:
+		return constants.MsgPlotReleaseNoPlan
+	case constants.ReleaseBlockerPlanOngoing:
+		return constants.MsgPlotReleasePlanOngoing
+	case constants.ReleaseBlockerNoHarvest:
+		return constants.MsgPlotReleaseNoHarvest
+	case constants.ReleaseBlockerHarvestOnUnfinishedPlan:
+		return constants.MsgPlotReleaseHarvestOther
+	default:
+		return ""
 	}
 }
 

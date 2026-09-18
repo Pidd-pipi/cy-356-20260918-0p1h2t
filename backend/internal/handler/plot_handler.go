@@ -72,7 +72,14 @@ func (h *PlotHandler) List(c *gin.Context) {
 	}
 	list := make([]*dto.PlotOutDTO, 0, len(plots))
 	for i := range plots {
-		list = append(list, dto.ToPlotOutDTO(&plots[i]))
+		out := dto.ToPlotOutDTO(&plots[i])
+		// 公开列表仅在地块处于认养中时附带释放条件（释放入口感知）。
+		if plots[i].Status != string(constants.PlotStatusAvailable) {
+			if e, eErr := h.plotService.ReleaseEligibility(plots[i].ID); eErr == nil {
+				out.ApplyReleaseEligibility(e)
+			}
+		}
+		list = append(list, out)
 	}
 	util.OK(c, util.PageResult{List: list, Total: total, Page: pq.Page, PageSize: pq.PageSize})
 }
@@ -89,7 +96,28 @@ func (h *PlotHandler) Get(c *gin.Context) {
 		util.FailWithAppError(c, err)
 		return
 	}
-	util.OK(c, dto.ToPlotOutDTO(p))
+	out := dto.ToPlotOutDTO(p)
+	if p.Status != string(constants.PlotStatusAvailable) {
+		if e, eErr := h.plotService.ReleaseEligibility(p.ID); eErr == nil {
+			out.ApplyReleaseEligibility(e)
+		}
+	}
+	util.OK(c, out)
+}
+
+// ReleaseEligibility 查询地块释放条件（说明缺少哪项前置条件）。
+func (h *PlotHandler) ReleaseEligibility(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, constants.CodeBadRequest, "路径参数 id 必须为正整数")
+		return
+	}
+	e, err := h.plotService.ReleaseEligibility(uint(id))
+	if err != nil {
+		util.FailWithAppError(c, err)
+		return
+	}
+	util.OK(c, e)
 }
 
 // Adopt 认养地块（登录用户）。

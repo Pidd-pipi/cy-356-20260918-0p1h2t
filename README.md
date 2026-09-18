@@ -28,11 +28,20 @@ docker compose up -d --build
 
 ## ✨ 主要功能
 
-1. **地块认养与 GIS 展示**：地图展示地块分布，标注空闲/已认养/待释放状态，展示面积、土壤类型、日照条件，在线认养。
+1. **地块认养与 GIS 展示**：地图展示地块分布，标注空闲/已认养/可释放状态，展示面积、土壤类型、日照条件，在线认养。
 2. **种植计划与作物推荐**：认养后制定种植计划，按季节推荐适宜作物，生成预期收获时间线（蔬菜 45 天/水果 90 天/香草 35 天）。
 3. **种植日记图文记录**：按播种/浇水/施肥/除虫/收成记录种植过程，支持点赞与评论。
 4. **收成预警与采摘提醒**：近 7 天成熟作物自动提醒，记录采摘重量与品质，生成年度收成统计报表。
 5. **农友社区交流**：种植经验 / 病虫害防治 / 食谱创意 / 线下农耕活动四类帖子，实时动态 WebSocket 广播。
+
+### 🔒 地块释放规则（强约束）
+
+地块**只有在存在一条“已完成（completed）”的种植计划、且至少有一条收成记录关联到该已完成计划时**才能释放：
+
+- 条件不足时释放入口不可用（按钮禁用并悬浮说明缺少哪一项），后端返回 `409 / 2010` 并在 `message` 中明确原因：没有计划（`no_plan`）、计划未完成（`plan_ongoing`）、计划已完成但无收成（`no_harvest`）、收成只挂在未完成计划上（`harvest_unfinished_plan`）。
+- **已有完成计划但没有收成记录、或收成记录对应的计划未完成的地块，都必须保持“已认养（adopted）”**，认养关系不会被清除。
+- 释放判定与状态变更在同一数据库事务内用 `SELECT ... FOR UPDATE` 行锁完成；两名操作者并发释放同一地块时**只有一人成功**，失败方收到 `409 / 2011` 状态冲突，且不会清除认养关系或改变状态。
+- 计划完成、收成录入/删除后，地块的 `adopted ⇄ harvested` 状态会在同一事务内按上述条件自动重新校准（`PlotService.RefreshHarvestReadyTx`）。
 
 ## 🛠 技术栈
 
@@ -116,7 +125,8 @@ README.md
 | 枚举 | 取值 | 后端出现位置 |
 | --- | --- | --- |
 | RoleType 角色 | admin / farmer / citizen | `constants/enums.go`、`model/user.go`、`dto/user_dto.go`、`service/user_service.go`（ChangeRole 校验）、`middleware/rbac.go`、`middleware/audit.go`、`handler/planting_plan_handler.go`、`handler/harvest_handler.go`、`handler/diary_handler.go`、`util/formatters.go`、`log_templates.go`、`error_codes.go`、`database/database.go`（种子数据） |
-| PlotStatus 地块状态 | available / adopted / harvested | `constants/enums.go`、`model/plot.go`、`dto/plot_dto.go`、`service/plot_service.go`（认养/释放状态机）、`repository/plot_repository.go`（过滤）、`util/formatters.go`、`log_templates.go`、`database/database.go`（种子数据）、`api/openapi.yaml` |
+| PlotStatus 地块状态 | available / adopted / harvested | `constants/enums.go`、`model/plot.go`、`dto/plot_dto.go`、`service/plot_service.go`（认养/释放状态机 + RefreshHarvestReadyTx）、`repository/plot_repository.go`（过滤/FOR UPDATE）、`util/formatters.go`、`log_templates.go`、`database/database.go`（种子数据）、`api/openapi.yaml`、前端 `constants/index.ts`（PlotStatusMeta / 释放入口）、`pages/PlotMap.vue`（按钮显隐） |
+| PlotReleaseBlocker 释放条件缺失原因 | not_adopted / no_plan / plan_ongoing / no_harvest / harvest_unfinished_plan | `constants/enums.go`、`constants/error_codes.go`（CodePlotReleasePrecondition=2010 / CodePlotStateConflict=2011）、`constants/messages.go`（释放缺失项文案）、`constants/log_templates.go`（LogPlotReleaseBlocked）、`dto/plot_dto.go`（ReleaseEligibility + PlotOutDTO 释放入口字段）、`service/plot_service.go`（evaluateReleaseEligibility 状态机）、`repository/planting_plan_repository.go`、`repository/harvest_record_repository.go`（事务内统计）、`handler/plot_handler.go`、`util/formatters.go`（PlotReleaseReasonText）、`api/openapi.yaml`、前端 `constants/index.ts`（PlotReleaseReasonText）、`api/plot.ts`、`pages/PlotMap.vue`（禁用 + 悬浮说明） |
 | PlanStatus 种植计划状态 | planned / planting / growing / harvesting / completed | `constants/enums.go`、`model/planting_plan.go`、`dto/planting_plan_dto.go`（oneof 校验）、`service/planting_plan_service.go`（PlanStatusTransitions 状态机）、`handler/planting_plan_handler.go`、`util/formatters.go`、`log_templates.go`、`error_codes.go`（CodePlanStateNotAllowed）、`database/database.go`（种子数据）、前端 `constants/index.ts`（PlanStatusMeta / PlanStatusNext 按钮显隐） |
 | CropType 作物类型 | vegetable / fruit / herb | `constants/enums.go`、`model/planting_plan.go`、`dto/planting_plan_dto.go`、`service/planting_plan_service.go`（成熟时间估算）、`util/formatters.go`、`repository/harvest_record_repository.go`（分组统计）、`database/database.go` |
 | Season 季节 | spring / summer / autumn / winter | `constants/enums.go`、`dto/planting_plan_dto.go`、`service/planting_plan_service.go`（SeasonCrops 推荐表）、`util/formatters.go`、`database/database.go`、前端 `pages/PlantingPlan.vue`、`pages/Dashboard.vue` |
@@ -152,7 +162,8 @@ README.md
 | POST | `/plots` | 创建地块 | 管理员 |
 | PUT | `/plots/:id` | 更新地块 | 管理员 |
 | POST | `/plots/:id/adopt` | 认养地块（事务 + FOR UPDATE） | 登录 |
-| POST | `/plots/:id/release` | 释放地块 | 认养人/管理员 |
+| GET | `/plots/:id/release-eligibility` | 查询释放条件（缺少哪项：计划/收成） | 登录 |
+| POST | `/plots/:id/release` | 释放地块（需已完成计划+关联收成；事务 + FOR UPDATE，并发仅一人成功） | 认养人/管理员 |
 
 ### 种植计划
 | 方法 | 路径 | 说明 | 鉴权 |
@@ -206,6 +217,7 @@ README.md
 ### 接口复用说明
 - `GET /stats/annual`（收成统计接口）与 `GET /planting-plans/stats`（种植计划统计）**复用同一个 service 方法** `HarvestRecordService.AnnualStats`。
 - `GET /plots/:id`（地块详情接口）与创建种植计划 `POST /planting-plans` **复用同一个 service 方法** `PlotService.GetByID`。
+- `GET /plots`、`GET /plots/:id` 与 `GET /plots/:id/release-eligibility` **复用同一个 service 方法** `PlotService.ReleaseEligibility`（释放入口感知）；`PlotService.RefreshHarvestReadyTx` 被计划完成、收成录入、收成删除三处事务复用。
 - 分页 `util.Paginate` 被全部 repository 复用；`ListByUser` 系列仓储方法被计划/收成列表接口复用。
 
 ## 🔌 API 调用示例（curl，含 JWT 请求头）

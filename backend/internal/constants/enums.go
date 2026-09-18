@@ -27,7 +27,20 @@ type PlotStatus string
 const (
 	PlotStatusAvailable PlotStatus = "available" // 空闲可认养
 	PlotStatusAdopted   PlotStatus = "adopted"   // 已认养
-	PlotStatusHarvested PlotStatus = "harvested" // 已收成待释放
+	PlotStatusHarvested PlotStatus = "harvested" // 可释放（存在已完成计划且有关联收成记录）
+)
+
+// PlotReleaseBlocker 地块释放入口不可用的原因（前后端共享枚举）。
+// 只有“已完成的种植计划 + 至少一条关联到该已完成计划的收成记录”同时满足时地块才可释放。
+type PlotReleaseBlocker string
+
+const (
+	ReleaseBlockerNone                    PlotReleaseBlocker = ""                        // 满足释放条件
+	ReleaseBlockerNotAdopted              PlotReleaseBlocker = "not_adopted"             // 地块未处于认养状态
+	ReleaseBlockerNoPlan                  PlotReleaseBlocker = "no_plan"                 // 没有任何种植计划
+	ReleaseBlockerPlanOngoing             PlotReleaseBlocker = "plan_ongoing"            // 有计划但没有已完成的计划
+	ReleaseBlockerNoHarvest               PlotReleaseBlocker = "no_harvest"              // 计划已完成但没有任何收成记录
+	ReleaseBlockerHarvestOnUnfinishedPlan PlotReleaseBlocker = "harvest_unfinished_plan" // 有收成但仅关联到未完成的计划
 )
 
 // SoilType 土壤类型
