@@ -26,16 +26,17 @@ var PlanStatusTransitions = map[constants.PlanStatus][]constants.PlanStatus{
 
 // PlantingPlanService 种植计划服务。
 type PlantingPlanService struct {
-	planRepo  repository.PlantingPlanRepository
-	plotRepo  repository.PlotRepository
-	plotSvc   *PlotService
-	db        *gorm.DB
-	logger    *slog.Logger
+	planRepo    repository.PlantingPlanRepository
+	plotRepo    repository.PlotRepository
+	harvestRepo repository.HarvestRecordRepository
+	plotSvc     *PlotService
+	db          *gorm.DB
+	logger      *slog.Logger
 }
 
 // NewPlantingPlanService 构造种植计划服务。
-func NewPlantingPlanService(planRepo repository.PlantingPlanRepository, plotRepo repository.PlotRepository, plotSvc *PlotService, db *gorm.DB, logger *slog.Logger) *PlantingPlanService {
-	return &PlantingPlanService{planRepo: planRepo, plotRepo: plotRepo, plotSvc: plotSvc, db: db, logger: logger}
+func NewPlantingPlanService(planRepo repository.PlantingPlanRepository, plotRepo repository.PlotRepository, harvestRepo repository.HarvestRecordRepository, plotSvc *PlotService, db *gorm.DB, logger *slog.Logger) *PlantingPlanService {
+	return &PlantingPlanService{planRepo: planRepo, plotRepo: plotRepo, harvestRepo: harvestRepo, plotSvc: plotSvc, db: db, logger: logger}
 }
 
 // Create 创建种植计划（事务：锁定地块、校验认养关系、季节推荐校验、生成收获时间线）。
@@ -128,7 +129,8 @@ func (s *PlantingPlanService) Update(id, userID uint, role string, req *dto.Upda
 }
 
 // ChangeStatus 状态流转（planned->planting->growing->harvesting->completed）。
-// 流转到 completed 时在同一事务内将地块标记为待释放（harvested）。
+// 流转到 completed 时在同一事务内按释放前置条件重算地块状态：
+// 仅当计划已完成且该计划已有收成记录时地块才进入 harvested，否则保持 adopted。
 func (s *PlantingPlanService) ChangeStatus(id, userID uint, role, target string) (*model.PlantingPlan, error) {
 	plan, err := s.planRepo.FindByID(id)
 	if err != nil {
@@ -155,10 +157,15 @@ func (s *PlantingPlanService) ChangeStatus(id, userID uint, role, target string)
 			return util.NewAppError(constants.CodeInternalError, 500, constants.ErrorText[constants.CodeInternalError]).Wrap(err)
 		}
 		if next == constants.PlanStatusCompleted {
-			if err := s.plotSvc.MarkHarvested(tx, plan.PlotID); err != nil {
-				return util.NewAppError(constants.CodeInternalError, 500, constants.ErrorText[constants.CodeInternalError]).Wrap(err)
+			// 完成计划后按“已完成计划 + 收成记录”双条件重算地块状态。
+			harvestCount := 0
+			if records, hErr := s.harvestRepo.ListByPlan(plan.ID); hErr == nil {
+				harvestCount = len(records)
 			}
-			s.logger.Info(constants.LogPlanCompleted, "plan_id", plan.ID, "user_id", userID, "harvest_count", 0)
+			if err := s.plotSvc.RecomputeReleaseStatus(tx, plan.PlotID); err != nil {
+				return err
+			}
+			s.logger.Info(constants.LogPlanCompleted, "plan_id", plan.ID, "user_id", userID, "harvest_count", harvestCount)
 		}
 		return nil
 	})

@@ -15,6 +15,11 @@ export interface Plot {
   adopter: UserInfo | null
   description: string
   created_at: string
+  // 释放入口前置条件：对应种植计划已完成 且 至少一条收成记录
+  has_completed_plan: boolean
+  has_harvest_record: boolean
+  can_release: boolean
+  release_block_reason: string
 }
 
 export interface PlotPayload {

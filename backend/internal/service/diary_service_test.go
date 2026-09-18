@@ -19,7 +19,7 @@ func TestDiaryService_CreateLikeComment(t *testing.T) {
 	if _, err := plotSvc.Adopt(plot.ID, user.ID, "farmer", "farmer"); err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
-	planSvc := NewPlantingPlanService(planRepo, repository.NewPlotRepository(db), plotSvc, db, testLogger())
+	planSvc := NewPlantingPlanService(planRepo, repository.NewPlotRepository(db), repository.NewHarvestRecordRepository(db), plotSvc, db, testLogger())
 	plan, err := planSvc.Create(&dto.CreatePlanRequest{PlotID: plot.ID, CropName: "生菜", CropType: "vegetable", Season: "spring"}, user.ID)
 	if err != nil {
 		t.Fatalf("create plan: %v", err)

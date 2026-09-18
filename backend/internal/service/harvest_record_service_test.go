@@ -12,15 +12,15 @@ func TestHarvestRecordService_CreateAndStats(t *testing.T) {
 	db := newTestServiceDB(t)
 	harvestRepo := repository.NewHarvestRecordRepository(db)
 	planRepo := repository.NewPlantingPlanRepository(db)
-	svc := NewHarvestRecordService(harvestRepo, planRepo, db, testLogger())
+	plotSvc, _ := newPlotService(t, db)
+	svc := NewHarvestRecordService(harvestRepo, planRepo, plotSvc, db, testLogger())
 
 	user := newTestUser(t, db, "farmer", "farmer")
 	plot := newTestPlot(t, db, "P-HV", "available", nil)
-	plotSvc, _ := newPlotService(t, db)
 	if _, err := plotSvc.Adopt(plot.ID, user.ID, "farmer", "farmer"); err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
-	planSvc := NewPlantingPlanService(planRepo, repository.NewPlotRepository(db), plotSvc, db, testLogger())
+	planSvc := NewPlantingPlanService(planRepo, repository.NewPlotRepository(db), harvestRepo, plotSvc, db, testLogger())
 	plan, err := planSvc.Create(&dto.CreatePlanRequest{PlotID: plot.ID, CropName: "番茄", CropType: "vegetable", Season: "summer"}, user.ID)
 	if err != nil {
 		t.Fatalf("create plan: %v", err)

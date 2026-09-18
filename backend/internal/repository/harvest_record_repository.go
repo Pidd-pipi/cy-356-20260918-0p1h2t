@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/communitygarden/server/internal/constants"
 	"github.com/communitygarden/server/internal/model"
 	"github.com/communitygarden/server/internal/util"
 )
@@ -16,6 +17,7 @@ type HarvestRecordRepository interface {
 	CreateWithTx(tx *gorm.DB, h *model.HarvestRecord) error
 	Update(h *model.HarvestRecord) error
 	Delete(id uint) error
+	DeleteWithTx(tx *gorm.DB, id uint) error
 	FindByID(id uint) (*model.HarvestRecord, error)
 	List(pq util.PageQuery, userID uint) ([]model.HarvestRecord, int64, error)
 	ListByPlan(planID uint) ([]model.HarvestRecord, error)
@@ -23,6 +25,9 @@ type HarvestRecordRepository interface {
 	SumWeightByYear(userID uint, year int) (float64, int, error)
 	GroupByCropType(userID uint, year int) (map[string]float64, error)
 	GroupByQuality(userID uint, year int) (map[string]int, error)
+	// PlotIDsWithHarvest 返回入参地块中，存在“对应已完成种植计划”的收成记录的地块 ID。
+	// 收成记录对应计划未完成的不计入；tx 非空时在指定事务内执行。
+	PlotIDsWithHarvest(tx *gorm.DB, plotIDs []uint, adopterID uint) (map[uint]bool, error)
 }
 
 type harvestRecordRepository struct {
@@ -49,6 +54,11 @@ func (r *harvestRecordRepository) Update(h *model.HarvestRecord) error {
 
 func (r *harvestRecordRepository) Delete(id uint) error {
 	return r.db.Delete(&model.HarvestRecord{}, id).Error
+}
+
+// DeleteWithTx 在指定事务内删除收成记录。
+func (r *harvestRecordRepository) DeleteWithTx(tx *gorm.DB, id uint) error {
+	return tx.Delete(&model.HarvestRecord{}, id).Error
 }
 
 func (r *harvestRecordRepository) FindByID(id uint) (*model.HarvestRecord, error) {
@@ -152,6 +162,33 @@ func (r *harvestRecordRepository) GroupByQuality(userID uint, year int) (map[str
 	out := make(map[string]int, len(rows))
 	for _, v := range rows {
 		out[v.Quality] = v.Cnt
+	}
+	return out, nil
+}
+
+// PlotIDsWithHarvest 批量查询存在“对应已完成计划”的收成记录的地块（限当前认养人）。
+func (r *harvestRecordRepository) PlotIDsWithHarvest(tx *gorm.DB, plotIDs []uint, adopterID uint) (map[uint]bool, error) {
+	out := make(map[uint]bool)
+	if len(plotIDs) == 0 {
+		return out, nil
+	}
+	var ids []uint
+	q := r.db.Model(&model.HarvestRecord{})
+	if tx != nil {
+		q = tx.Model(&model.HarvestRecord{})
+	}
+	err := q.
+		Joins("JOIN planting_plans ON planting_plans.id = harvest_records.plan_id").
+		Where("planting_plans.plot_id IN ? AND planting_plans.user_id = ?", plotIDs, adopterID).
+		Where("planting_plans.status = ?", string(constants.PlanStatusCompleted)).
+		Where("harvest_records.user_id = ?", adopterID).
+		Distinct().
+		Pluck("planting_plans.plot_id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		out[id] = true
 	}
 	return out, nil
 }

@@ -19,6 +19,8 @@ const (
 	LogPlotCreated            = "plot created, plot_id=%d code=%s operator=%s"
 	LogPlotAdopted            = "plot adopted, plot_id=%d code=%s user_id=%d role=%s"
 	LogPlotReleased           = "plot released, plot_id=%d code=%s operator=%s"
+	LogPlotReleaseBlocked     = "plot release blocked, plot_id=%d code=%s operator=%s reason=%s"
+	LogPlotEligibilityChanged = "plot release eligibility changed, plot_id=%d code=%s status=%s plan_completed=%t has_harvest=%t"
 	LogPlanCreated            = "planting plan created, plan_id=%d plot_id=%d user_id=%d crop=%s"
 	LogPlanStatusChanged      = "planting plan status changed, plan_id=%d user_id=%d from=%s to=%s"
 	LogPlanCompleted          = "planting plan completed, plan_id=%d user_id=%d harvest_count=%d"

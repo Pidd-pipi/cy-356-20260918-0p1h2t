@@ -117,6 +117,34 @@ func Seed(db *gorm.DB, logger *slog.Logger) error {
 		return err
 	}
 
+	// P-004 演示“已完成计划 + 收成记录”的待释放地块（满足释放双前置条件）。
+	p004PlantDate := now.AddDate(0, 0, -90)
+	p004HarvestDate := util.NextHarvestDate(p004PlantDate, string(constants.CropVegetable))
+	p004Plan := model.PlantingPlan{
+		PlotID:              seedPlots[3].ID,
+		UserID:              farmerID,
+		CropName:            "生菜",
+		CropType:            string(constants.CropVegetable),
+		Season:              string(constants.SeasonSpring),
+		Status:              string(constants.PlanStatusCompleted),
+		PlantDate:           &p004PlantDate,
+		ExpectedHarvestDate: &p004HarvestDate,
+		Notes:               "老李已采收完毕的生菜地块，等待释放",
+	}
+	if err := db.Create(&p004Plan).Error; err != nil {
+		return err
+	}
+	pickedDate := now.AddDate(0, 0, -10)
+	seedHarvests := []model.HarvestRecord{
+		{PlanID: p004Plan.ID, UserID: farmerID, CropName: "生菜", HarvestDate: pickedDate, WeightKg: 3.2, Quality: string(constants.QualityExcellent), Notes: "第一茬，叶片脆嫩"},
+		{PlanID: p004Plan.ID, UserID: farmerID, CropName: "生菜", HarvestDate: now.AddDate(0, 0, -3), WeightKg: 2.1, Quality: string(constants.QualityGood), Notes: "第二茬"},
+	}
+	for i := range seedHarvests {
+		if err := db.Create(&seedHarvests[i]).Error; err != nil {
+			return err
+		}
+	}
+
 	seedDiaries := []model.DiaryEntry{
 		{PlanID: plan.ID, UserID: farmerID, ActionType: string(constants.DiarySowing), Title: "播种日", Content: "今天完成了番茄播种，用育苗盘催芽，三天后出苗。", LikeCount: 3},
 		{PlanID: plan.ID, UserID: farmerID, ActionType: string(constants.DiaryWatering), Title: "日常浇水", Content: "早晚各浇一次水，保持土壤湿润但不积水。", LikeCount: 1},

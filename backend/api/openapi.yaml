@@ -28,7 +28,7 @@ paths:
   /plots:
     get:
       tags: [plots]
-      summary: 地块列表（公开）
+      summary: 地块列表（公开；返回释放入口字段 has_completed_plan/has_harvest_record/can_release/release_block_reason）
       responses: { '200': { description: 成功 } }
     post:
       tags: [plots]
@@ -52,8 +52,18 @@ paths:
   /plots/{id}/release:
     post:
       tags: [plots]
-      summary: 释放地块
-      responses: { '200': { description: 成功 } }
+      summary: 释放地块（前置条件：对应种植计划已完成且至少一条对应收成记录；事务 + 行锁，并发仅一人成功）
+      description: |
+        释放入口前置条件（两项必须同时满足，错误码 2010 并在 message 中说明缺少哪项）：
+        1. 地块当前认养周期存在已完成（completed）的种植计划；
+        2. 该已完成计划至少存在一条收成记录（收成记录对应计划未完成的不计入）。
+        条件不足时地块保持已认养（adopted/harvested），认养关系不变。
+        两名操作者并发释放时，仅一人成功；失败方返回 2011（已被释放冲突），不会清空认养关系或改变状态。
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        '200': { description: 成功，返回最新地块（status=available，adopter_id=null） }
+        '409': { description: '2010 前置条件不足 / 2011 并发释放冲突' }
+        '403': { description: '1002 非管理员且非认养人' }
   /planting-plans:
     get:
       tags: [planting-plans]

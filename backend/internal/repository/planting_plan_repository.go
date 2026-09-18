@@ -5,6 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/communitygarden/server/internal/constants"
 	"github.com/communitygarden/server/internal/model"
 	"github.com/communitygarden/server/internal/util"
 )
@@ -21,6 +22,9 @@ type PlantingPlanRepository interface {
 	CountByUser(userID uint) (int64, error)
 	CountByStatus() (map[string]int64, error)
 	CountActiveByUser(userID uint) (int64, error)
+	// CompletedPlotIDs 返回入参地块中当前认养周期内存在已完成种植计划的地块 ID。
+	// tx 非空时在指定事务内执行（释发行锁后复核使用）。
+	CompletedPlotIDs(tx *gorm.DB, plotIDs []uint, adopterID uint) (map[uint]bool, error)
 }
 
 type plantingPlanRepository struct {
@@ -115,4 +119,28 @@ func (r *plantingPlanRepository) CountActiveByUser(userID uint) (int64, error) {
 		Where("user_id = ? AND status IN ?", userID, []string{"planned", "planting", "growing", "harvesting"}).
 		Count(&total).Error
 	return total, err
+}
+
+// CompletedPlotIDs 批量查询存在已完成种植计划的地块（限定当前认养人，避免历史周期数据影响）。
+func (r *plantingPlanRepository) CompletedPlotIDs(tx *gorm.DB, plotIDs []uint, adopterID uint) (map[uint]bool, error) {
+	out := make(map[uint]bool)
+	if len(plotIDs) == 0 {
+		return out, nil
+	}
+	var ids []uint
+	q := r.db.Model(&model.PlantingPlan{})
+	if tx != nil {
+		q = tx.Model(&model.PlantingPlan{})
+	}
+	err := q.
+		Where("plot_id IN ? AND user_id = ? AND status = ?", plotIDs, adopterID, string(constants.PlanStatusCompleted)).
+		Distinct().
+		Pluck("plot_id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
 }

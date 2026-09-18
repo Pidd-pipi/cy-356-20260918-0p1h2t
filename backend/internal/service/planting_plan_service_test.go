@@ -40,8 +40,9 @@ func TestPlantingPlanService_CreateAndFlow(t *testing.T) {
 	db := newTestServiceDB(t)
 	planRepo := repository.NewPlantingPlanRepository(db)
 	plotRepo := repository.NewPlotRepository(db)
+	harvestRepo := repository.NewHarvestRecordRepository(db)
 	plotSvc, _ := newPlotService(t, db)
-	svc := NewPlantingPlanService(planRepo, plotRepo, plotSvc, db, testLogger())
+	svc := NewPlantingPlanService(planRepo, plotRepo, harvestRepo, plotSvc, db, testLogger())
 
 	user := newTestUser(t, db, "farmer", "farmer")
 	plot := newTestPlot(t, db, "P-PLAN", "available", nil)
@@ -64,7 +65,7 @@ func TestPlantingPlanService_CreateAndFlow(t *testing.T) {
 		t.Errorf("plan invalid: status=%s", plan.Status)
 	}
 
-	// 状态流转到 completed 后地块应变为 harvested
+	// 状态流转到 completed 但没有收成记录：地块必须保持 adopted（释放入口条件不足）
 	steps := []string{"planting", "growing", "harvesting", "completed"}
 	for _, s := range steps {
 		if _, err := svc.ChangeStatus(plan.ID, user.ID, "farmer", s); err != nil {
@@ -78,8 +79,31 @@ func TestPlantingPlanService_CreateAndFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if plotAfter.Status != string(constants.PlotStatusHarvested) {
-		t.Errorf("plot status=%s, want harvested", plotAfter.Status)
+	if plotAfter.Status != string(constants.PlotStatusAdopted) {
+		t.Errorf("plot status=%s, want adopted (completed plan without harvest must stay adopted)", plotAfter.Status)
+	}
+	// 此时释放必须被拒，且认养关系不变
+	if _, err := plotSvc.Release(plot.ID, user.ID, "farmer"); err == nil {
+		t.Fatalf("expected release prerequisite error (no harvest record)")
+	}
+	plotAfter2, _ := plotSvc.GetByID(plot.ID)
+	if plotAfter2.Status != string(constants.PlotStatusAdopted) || plotAfter2.AdopterID == nil {
+		t.Fatalf("failed release mutated plot: status=%s adopter=%v", plotAfter2.Status, plotAfter2.AdopterID)
+	}
+
+	// 为已完成计划补录一条收成记录后，地块才进入 harvested，释放入口可用
+	harvestSvc := NewHarvestRecordService(harvestRepo, planRepo, plotSvc, db, testLogger())
+	if _, err := harvestSvc.Create(&dto.CreateHarvestRequest{
+		PlanID: plan.ID, CropName: "菠菜", HarvestDate: "2026-04-01", WeightKg: 2.5, Quality: "good",
+	}, user.ID); err != nil {
+		t.Fatalf("create harvest on completed plan: %v", err)
+	}
+	plotAfter3, err := plotSvc.GetByID(plot.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if plotAfter3.Status != string(constants.PlotStatusHarvested) || plotAfter3.AdopterID == nil {
+		t.Fatalf("plot status=%s adopter=%v, want harvested with adopter kept", plotAfter3.Status, plotAfter3.AdopterID)
 	}
 }
 
@@ -87,8 +111,9 @@ func TestPlantingPlanService_Recommendations(t *testing.T) {
 	db := newTestServiceDB(t)
 	planRepo := repository.NewPlantingPlanRepository(db)
 	plotRepo := repository.NewPlotRepository(db)
+	harvestRepo := repository.NewHarvestRecordRepository(db)
 	plotSvc, _ := newPlotService(t, db)
-	svc := NewPlantingPlanService(planRepo, plotRepo, plotSvc, db, testLogger())
+	svc := NewPlantingPlanService(planRepo, plotRepo, harvestRepo, plotSvc, db, testLogger())
 	recs, err := svc.Recommendations("spring")
 	if err != nil {
 		t.Fatalf("Recommendations: %v", err)

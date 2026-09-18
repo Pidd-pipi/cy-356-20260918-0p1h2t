@@ -116,7 +116,7 @@ README.md
 | 枚举 | 取值 | 后端出现位置 |
 | --- | --- | --- |
 | RoleType 角色 | admin / farmer / citizen | `constants/enums.go`、`model/user.go`、`dto/user_dto.go`、`service/user_service.go`（ChangeRole 校验）、`middleware/rbac.go`、`middleware/audit.go`、`handler/planting_plan_handler.go`、`handler/harvest_handler.go`、`handler/diary_handler.go`、`util/formatters.go`、`log_templates.go`、`error_codes.go`、`database/database.go`（种子数据） |
-| PlotStatus 地块状态 | available / adopted / harvested | `constants/enums.go`、`model/plot.go`、`dto/plot_dto.go`、`service/plot_service.go`（认养/释放状态机）、`repository/plot_repository.go`（过滤）、`util/formatters.go`、`log_templates.go`、`database/database.go`（种子数据）、`api/openapi.yaml` |
+| PlotStatus 地块状态 | available / adopted / harvested | `constants/enums.go`、`model/plot.go`、`dto/plot_dto.go`（含 has_completed_plan/has_harvest_record/can_release/release_block_reason）、`service/plot_service.go`（认养/释放状态机 + RecomputeReleaseStatus）、`repository/plot_repository.go`（过滤）、`repository/planting_plan_repository.go`（CompletedPlotIDs）、`repository/harvest_record_repository.go`（PlotIDsWithHarvest）、`util/formatters.go`、`log_templates.go`、`error_codes.go`（CodeReleasePrerequisite/CodePlotReleaseConflict）、`messages.go`、`database/database.go`（种子数据）、`api/openapi.yaml`、前端 `constants/index.ts`、`api/plot.ts`、`pages/PlotMap.vue`（按钮置灰 + 缺失项提示） |
 | PlanStatus 种植计划状态 | planned / planting / growing / harvesting / completed | `constants/enums.go`、`model/planting_plan.go`、`dto/planting_plan_dto.go`（oneof 校验）、`service/planting_plan_service.go`（PlanStatusTransitions 状态机）、`handler/planting_plan_handler.go`、`util/formatters.go`、`log_templates.go`、`error_codes.go`（CodePlanStateNotAllowed）、`database/database.go`（种子数据）、前端 `constants/index.ts`（PlanStatusMeta / PlanStatusNext 按钮显隐） |
 | CropType 作物类型 | vegetable / fruit / herb | `constants/enums.go`、`model/planting_plan.go`、`dto/planting_plan_dto.go`、`service/planting_plan_service.go`（成熟时间估算）、`util/formatters.go`、`repository/harvest_record_repository.go`（分组统计）、`database/database.go` |
 | Season 季节 | spring / summer / autumn / winter | `constants/enums.go`、`dto/planting_plan_dto.go`、`service/planting_plan_service.go`（SeasonCrops 推荐表）、`util/formatters.go`、`database/database.go`、前端 `pages/PlantingPlan.vue`、`pages/Dashboard.vue` |
@@ -152,7 +152,20 @@ README.md
 | POST | `/plots` | 创建地块 | 管理员 |
 | PUT | `/plots/:id` | 更新地块 | 管理员 |
 | POST | `/plots/:id/adopt` | 认养地块（事务 + FOR UPDATE） | 登录 |
-| POST | `/plots/:id/release` | 释放地块 | 认养人/管理员 |
+| POST | `/plots/:id/release` | 释放地块（事务 + FOR UPDATE；需计划已完成且有收成记录，并发仅一人成功） | 认养人/管理员 |
+
+#### 地块释放业务规则（释放入口条件）
+
+地块只有在**对应种植计划已完成（completed）且至少有一条对应收成记录**后才能释放，两项条件缺一不可：
+
+- **条件不足时释放入口不可用**：前端按钮置灰并悬浮提示缺少哪项（`release_block_reason`：计划未完成 / 无收成记录 / 二者皆缺）；后端在事务内行锁后复核，返回错误码 `2010 CodeReleasePrerequisite`，message 明确说明缺少项。
+- **以下地块必须保持已认养（adopted），认养关系不清除**：
+  - 有已完成计划但没有任何收成记录的地块；
+  - 收成记录所对应的计划尚未完成的地块；
+  - 计划完成后删除了全部对应收成记录的地块（地块自动从 harvested 回退为 adopted）。
+- 状态重算触发点：计划流转到 `completed`、收成记录创建（含为已完成计划补录）、收成记录删除，均在同一事务内按双条件重算 `adopted ↔ harvested`。
+- **并发释放**：两名操作者并发释放同一地块时，`SELECT ... FOR UPDATE` 行锁串行化，仅一人成功（`harvested -> available` 并清空 `adopter_id`）；失败方返回 `2011 CodePlotReleaseConflict`，**不会清除认养关系或改变状态**。
+- 判定范围限定为地块当前认养人的计划与收成（历史认养周期数据不影响本轮释放）。
 
 ### 种植计划
 | 方法 | 路径 | 说明 | 鉴权 |

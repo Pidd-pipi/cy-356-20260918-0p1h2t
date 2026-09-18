@@ -39,10 +39,17 @@
       <el-table-column label="认养人" width="120">
         <template #default="{ row }">{{ row.adopter?.nickname || row.adopter?.username || '-' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="220">
+      <el-table-column label="操作" width="300">
         <template #default="{ row }">
           <el-button v-if="row.status === 'available'" type="success" size="small" @click="adopt(row)">认养</el-button>
-          <el-button v-if="canRelease(row)" type="warning" size="small" @click="release(row)">释放</el-button>
+          <template v-if="canManageRelease(row)">
+            <el-tooltip :disabled="row.can_release" :content="releaseTip(row)" placement="top">
+              <span>
+                <el-button type="warning" size="small" :disabled="!row.can_release" @click="release(row)">释放</el-button>
+              </span>
+            </el-tooltip>
+            <span v-if="!row.can_release" class="release-hint">{{ releaseHint(row) }}</span>
+          </template>
         </template>
       </el-table-column>
     </DataTable>
@@ -119,8 +126,20 @@ async function fetch() {
   await store.fetchPlots({ page: pagination.page.value, page_size: pagination.size.value })
 }
 
-function canRelease(row: Plot) {
-  return row.status === 'harvested' && (role.value === 'admin' || row.adopter_id === user.value?.id)
+function canManageRelease(row: Plot) {
+  // 管理员或当前认养人可看到释放入口；是否可点由 can_release（双前置条件）决定
+  return row.status !== 'available' && (role.value === 'admin' || row.adopter_id === user.value?.id)
+}
+
+function releaseTip(row: Plot) {
+  return row.release_block_reason || '释放入口不可用：缺少完成的种植计划或收成记录'
+}
+
+function releaseHint(row: Plot) {
+  const missing: string[] = []
+  if (!row.has_completed_plan) missing.push('计划未完成')
+  if (!row.has_harvest_record) missing.push('无收成记录')
+  return missing.join('、')
 }
 
 async function adopt(row: Plot) {
@@ -166,4 +185,5 @@ onMounted(fetch)
 
 <style scoped>
 .plot-map { width: 100%; height: 360px; border-radius: 8px; }
+.release-hint { margin-left: 8px; font-size: 12px; color: #909399; }
 </style>

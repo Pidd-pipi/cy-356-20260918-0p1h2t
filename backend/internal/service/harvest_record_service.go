@@ -18,13 +18,14 @@ import (
 type HarvestRecordService struct {
 	harvestRepo repository.HarvestRecordRepository
 	planRepo    repository.PlantingPlanRepository
+	plotSvc     *PlotService
 	db          *gorm.DB
 	logger      *slog.Logger
 }
 
 // NewHarvestRecordService 构造收成记录服务。
-func NewHarvestRecordService(harvestRepo repository.HarvestRecordRepository, planRepo repository.PlantingPlanRepository, db *gorm.DB, logger *slog.Logger) *HarvestRecordService {
-	return &HarvestRecordService{harvestRepo: harvestRepo, planRepo: planRepo, db: db, logger: logger}
+func NewHarvestRecordService(harvestRepo repository.HarvestRecordRepository, planRepo repository.PlantingPlanRepository, plotSvc *PlotService, db *gorm.DB, logger *slog.Logger) *HarvestRecordService {
+	return &HarvestRecordService{harvestRepo: harvestRepo, planRepo: planRepo, plotSvc: plotSvc, db: db, logger: logger}
 }
 
 // Create 记录收成（事务：校验计划归属与成熟状态）。
@@ -41,7 +42,11 @@ func (s *HarvestRecordService) Create(req *dto.CreateHarvestRequest, userID uint
 		if plan.UserID != userID {
 			return util.NewAppError(constants.CodeForbidden, 403, fmt.Sprintf("用户 id=%d 无权为他人种植计划 id=%d 记录收成", userID, req.PlanID))
 		}
-		if plan.Status != string(constants.PlanStatusGrowing) && plan.Status != string(constants.PlanStatusHarvesting) {
+		// growing / harvesting 可正常记录；completed 也允许补录，
+		// 否则“完成计划但无收成记录”的地块将永远无法满足释放前置条件。
+		if plan.Status != string(constants.PlanStatusGrowing) &&
+			plan.Status != string(constants.PlanStatusHarvesting) &&
+			plan.Status != string(constants.PlanStatusCompleted) {
 			return util.NewAppError(constants.CodeHarvestBeforeMature, 409, fmt.Sprintf("种植计划状态 %s 作物尚未成熟，不允许记录收成", util.PlanStatusText(plan.Status)))
 		}
 		harvestDate, err := dto.ParseHarvestDate(req.HarvestDate)
@@ -59,6 +64,12 @@ func (s *HarvestRecordService) Create(req *dto.CreateHarvestRequest, userID uint
 		}
 		if err := s.harvestRepo.CreateWithTx(tx, h); err != nil {
 			return util.NewAppError(constants.CodeInternalError, 500, constants.ErrorText[constants.CodeInternalError]).Wrap(err)
+		}
+		// 收成记录可能让已完成计划的地块满足释放前置条件，重算地块状态。
+		if plan.Status == string(constants.PlanStatusCompleted) {
+			if err := s.plotSvc.RecomputeReleaseStatus(tx, plan.PlotID); err != nil {
+				return err
+			}
 		}
 		created = h
 		return nil
@@ -108,21 +119,36 @@ func (s *HarvestRecordService) Update(id, userID uint, role string, req *dto.Upd
 }
 
 // Delete 删除收成记录（仅记录本人或管理员）。
+// 事务内删除并重算地块状态：已完成计划的最后一条收成记录被删除后，地块回到 adopted。
 func (s *HarvestRecordService) Delete(id, userID uint, role string) error {
-	h, err := s.harvestRepo.FindByID(id)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return util.NewAppError(constants.CodeNotFound, 404, fmt.Sprintf("收成记录实体 id=%d 不存在", id))
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		h, err := s.harvestRepo.FindByID(id)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return util.NewAppError(constants.CodeNotFound, 404, fmt.Sprintf("收成记录实体 id=%d 不存在", id))
+			}
+			return util.NewAppError(constants.CodeInternalError, 500, constants.ErrorText[constants.CodeInternalError]).Wrap(err)
 		}
-		return util.NewAppError(constants.CodeInternalError, 500, constants.ErrorText[constants.CodeInternalError]).Wrap(err)
-	}
-	if h.UserID != userID && role != string(constants.RoleAdmin) {
-		return util.NewAppError(constants.CodeForbidden, 403, fmt.Sprintf("角色 %s 无权删除他人收成记录 id=%d", util.RoleText(role), id))
-	}
-	if err := s.harvestRepo.Delete(id); err != nil {
-		return util.NewAppError(constants.CodeInternalError, 500, constants.ErrorText[constants.CodeInternalError]).Wrap(err)
-	}
-	return nil
+		if h.UserID != userID && role != string(constants.RoleAdmin) {
+			return util.NewAppError(constants.CodeForbidden, 403, fmt.Sprintf("角色 %s 无权删除他人收成记录 id=%d", util.RoleText(role), id))
+		}
+		plan, err := s.planRepo.FindByID(h.PlanID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return util.NewAppError(constants.CodeNotFound, 404, fmt.Sprintf("种植计划实体 id=%d 不存在", h.PlanID))
+			}
+			return util.NewAppError(constants.CodeInternalError, 500, constants.ErrorText[constants.CodeInternalError]).Wrap(err)
+		}
+		if err := s.harvestRepo.DeleteWithTx(tx, id); err != nil {
+			return util.NewAppError(constants.CodeInternalError, 500, constants.ErrorText[constants.CodeInternalError]).Wrap(err)
+		}
+		if plan.Status == string(constants.PlanStatusCompleted) {
+			if err := s.plotSvc.RecomputeReleaseStatus(tx, plan.PlotID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // List 分页查询收成记录（按用户过滤）。

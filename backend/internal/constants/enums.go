@@ -26,8 +26,8 @@ type PlotStatus string
 
 const (
 	PlotStatusAvailable PlotStatus = "available" // 空闲可认养
-	PlotStatusAdopted   PlotStatus = "adopted"   // 已认养
-	PlotStatusHarvested PlotStatus = "harvested" // 已收成待释放
+	PlotStatusAdopted   PlotStatus = "adopted"   // 已认养（计划未完成，或尚无收成记录）
+	PlotStatusHarvested PlotStatus = "harvested" // 已认养且满足释放前置条件（计划已完成 + 至少一条对应收成记录，待释放）
 )
 
 // SoilType 土壤类型
